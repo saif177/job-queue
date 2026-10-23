@@ -74,3 +74,60 @@ func TestWorkerPoolHandlesFailure(t *testing.T) {
 		t.Fatal("expected failing job to still be dequeued, not stuck in queue")
 	}
 }
+
+func TestStatusLifecycle(t *testing.T) {
+	q := New()
+	okID := q.Enqueue(func() error { return nil })
+	badID := q.Enqueue(func() error { return errors.New("boom") })
+
+	if job, ok := q.Get(okID); !ok || job.Status != StatusPending {
+		t.Fatalf("expected pending job, got %+v ok=%v", job, ok)
+	}
+
+	job, _ := q.Dequeue()
+	if got, _ := q.Get(job.ID); got.Status != StatusRunning || got.StartedAt.IsZero() {
+		t.Fatalf("expected running with start time, got %+v", got)
+	}
+	q.Complete(job.ID, job.Payload())
+	if got, _ := q.Get(okID); got.Status != StatusSucceeded || got.FinishedAt.IsZero() {
+		t.Fatalf("expected succeeded, got %+v", got)
+	}
+
+	job, _ = q.Dequeue()
+	q.Complete(job.ID, job.Payload())
+	got, _ := q.Get(badID)
+	if got.Status != StatusFailed || got.Err == nil || got.Err.Error() != "boom" {
+		t.Fatalf("expected failed with error, got %+v", got)
+	}
+}
+
+func TestGetUnknownID(t *testing.T) {
+	q := New()
+	if _, ok := q.Get(42); ok {
+		t.Fatal("expected unknown ID to return ok=false")
+	}
+	q.Complete(42, nil) // must not panic
+}
+
+func TestWorkerPoolUpdatesStatus(t *testing.T) {
+	q := New()
+	okID := q.Enqueue(func() error { return nil })
+	badID := q.Enqueue(func() error { return errors.New("boom") })
+
+	pool := NewWorkerPool(q, 2, 5*time.Millisecond)
+	pool.Start()
+	defer pool.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		a, _ := q.Get(okID)
+		b, _ := q.Get(badID)
+		if a.Status == StatusSucceeded && b.Status == StatusFailed {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	a, _ := q.Get(okID)
+	b, _ := q.Get(badID)
+	t.Fatalf("statuses not settled: ok=%s bad=%s", a.Status, b.Status)
+}

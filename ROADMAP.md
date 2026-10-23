@@ -3,7 +3,7 @@
 Incremental features, roughly in order. Pick the next unchecked item each session — doesn't have to be strictly sequential if something else makes more sense that day.
 
 - [x] Day 1: Core in-memory queue + worker pool (enqueue, dequeue, process)
-- [ ] Job status tracking (pending/running/succeeded/failed) + lookup by ID
+- [x] Job status tracking (pending/running/succeeded/failed) + lookup by ID
 - [ ] Retries with exponential backoff on failure
 - [ ] Persistence: swap in-memory store for SQLite
 - [ ] Priority queues (high/normal/low)
@@ -26,3 +26,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 ## Done
 
 - Day 1 (2026-10-22): scaffolded repo, basic in-memory queue + worker pool.
+- Day 2 (2026-10-23): job status tracking (pending/running/succeeded/failed) with timestamps and error, `Queue.Get` lookup by ID, `Queue.Complete` called by workers.

@@ -6,6 +6,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 
 - In-memory FIFO queue (`Queue`)
 - Worker pool that polls the queue and runs jobs concurrently (`WorkerPool`)
+- Job status tracking (pending/running/succeeded/failed) and lookup by ID (`Queue.Get`)
 
 ## Usage
 
