@@ -131,3 +131,85 @@ func TestWorkerPoolUpdatesStatus(t *testing.T) {
 	b, _ := q.Get(badID)
 	t.Fatalf("statuses not settled: ok=%s bad=%s", a.Status, b.Status)
 }
+
+func TestBackoffGrowsExponentiallyAndCaps(t *testing.T) {
+	q := New(WithRetry(10, 100*time.Millisecond, 500*time.Millisecond))
+	want := []time.Duration{100, 200, 400, 500, 500}
+	for i, w := range want {
+		if got := q.backoff(i + 1); got != w*time.Millisecond {
+			t.Fatalf("attempt %d: expected %v, got %v", i+1, w*time.Millisecond, got)
+		}
+	}
+}
+
+func TestRetryThenSucceed(t *testing.T) {
+	q := New(WithRetry(2, time.Second, 0))
+	clock := time.Now()
+	q.now = func() time.Time { return clock }
+
+	id := q.Enqueue(func() error { return nil })
+	boom := errors.New("boom")
+
+	job, _ := q.Dequeue()
+	q.Complete(job.ID, boom)
+
+	got, _ := q.Get(id)
+	if got.Status != StatusPending || got.Attempts != 1 || !errors.Is(got.Err, boom) {
+		t.Fatalf("expected pending after 1 attempt with error, got %+v", got)
+	}
+	if _, ok := q.Dequeue(); ok {
+		t.Fatal("job should not be ready during backoff")
+	}
+
+	clock = clock.Add(time.Second)
+	job, ok := q.Dequeue()
+	if !ok || job.Attempts != 2 {
+		t.Fatalf("expected retry as attempt 2, got ok=%v job=%+v", ok, job)
+	}
+	q.Complete(job.ID, nil)
+
+	got, _ = q.Get(id)
+	if got.Status != StatusSucceeded || got.Err != nil {
+		t.Fatalf("expected succeeded with cleared error, got %+v", got)
+	}
+}
+
+func TestRetriesExhaustedMarksFailed(t *testing.T) {
+	q := New(WithRetry(1, time.Second, 0))
+	clock := time.Now()
+	q.now = func() time.Time { return clock }
+
+	id := q.Enqueue(func() error { return nil })
+	boom := errors.New("boom")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		job, ok := q.Dequeue()
+		if !ok {
+			t.Fatalf("attempt %d: expected job", attempt)
+		}
+		q.Complete(job.ID, boom)
+		clock = clock.Add(10 * time.Second)
+	}
+
+	got, _ := q.Get(id)
+	if got.Status != StatusFailed || got.Attempts != 2 || !errors.Is(got.Err, boom) {
+		t.Fatalf("expected failed after 2 attempts, got %+v", got)
+	}
+	if _, ok := q.Dequeue(); ok {
+		t.Fatal("exhausted job must not be re-queued")
+	}
+}
+
+func TestBackoffDoesNotBlockOtherJobs(t *testing.T) {
+	q := New(WithRetry(1, time.Hour, 0))
+	first := q.Enqueue(func() error { return nil })
+	second := q.Enqueue(func() error { return nil })
+
+	job, _ := q.Dequeue()
+	q.Complete(job.ID, errors.New("boom"))
+
+	next, ok := q.Dequeue()
+	if !ok || next.ID != second || first == second {
+		t.Fatalf("expected second job to run while first backs off, got %+v ok=%v", next, ok)
+	}
+}

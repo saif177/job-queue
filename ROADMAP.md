@@ -4,7 +4,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 
 - [x] Day 1: Core in-memory queue + worker pool (enqueue, dequeue, process)
 - [x] Job status tracking (pending/running/succeeded/failed) + lookup by ID
-- [ ] Retries with exponential backoff on failure
+- [x] Retries with exponential backoff on failure
 - [ ] Persistence: swap in-memory store for SQLite
 - [ ] Priority queues (high/normal/low)
 - [ ] Dead-letter queue for jobs that exhaust retries
@@ -27,3 +27,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 
 - Day 1 (2026-10-22): scaffolded repo, basic in-memory queue + worker pool.
 - Day 2 (2026-10-23): job status tracking (pending/running/succeeded/failed) with timestamps and error, `Queue.Get` lookup by ID, `Queue.Complete` called by workers.
+- Day 3 (2026-10-26): retries with exponential backoff — `queue.New(queue.WithRetry(maxRetries, base, max))`; failed jobs go back to pending with a `RunAt` delay (base·2^(n-1), capped), `Attempts` tracked on `Job`, `Dequeue` skips jobs still backing off; marked failed once retries are exhausted.
