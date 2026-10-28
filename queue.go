@@ -1,6 +1,10 @@
 package queue
 
 import (
+	"errors"
+	"fmt"
+	"log"
+	"sort"
 	"sync"
 	"time"
 )
@@ -26,6 +30,24 @@ type Job struct {
 	FinishedAt time.Time
 	Attempts   int       // number of times the job has been dequeued to run
 	RunAt      time.Time // earliest time the job may be dequeued (set when awaiting a retry)
+
+	// Type and Data identify a persistable job: Type names a registered Handler
+	// and Data is its opaque argument. Jobs enqueued with a bare func have an
+	// empty Type and live in memory only.
+	Type string
+	Data []byte
+}
+
+// Handler runs a persistable job of a registered type.
+type Handler func(data []byte) error
+
+// Store persists job records so a Queue can recover after a restart.
+type Store interface {
+	// Save inserts or updates a job record.
+	Save(Job) error
+	// Load returns all persisted jobs.
+	Load() ([]Job, error)
+	Close() error
 }
 
 // Option configures a Queue.
@@ -42,12 +64,21 @@ func WithRetry(maxRetries int, base, max time.Duration) Option {
 	}
 }
 
+// WithStore enables write-through persistence for typed jobs. Use Open to
+// also recover previously persisted jobs.
+func WithStore(s Store) Option {
+	return func(q *Queue) { q.store = s }
+}
+
 // Queue is a simple thread-safe FIFO job queue.
 type Queue struct {
 	mu   sync.Mutex
 	jobs []int // IDs of pending jobs, in FIFO order
 	all  map[int]*Job
 	next int
+
+	store    Store
+	handlers map[string]Handler
 
 	maxRetries int
 	baseDelay  time.Duration
@@ -56,11 +87,87 @@ type Queue struct {
 }
 
 func New(opts ...Option) *Queue {
-	q := &Queue{all: make(map[int]*Job), now: time.Now}
+	q := &Queue{all: make(map[int]*Job), handlers: make(map[string]Handler), now: time.Now}
 	for _, opt := range opts {
 		opt(q)
 	}
 	return q
+}
+
+// Open creates a Queue backed by store and recovers its persisted jobs.
+// Jobs that were running when the previous process stopped are put back to
+// pending so they run again (at-least-once).
+func Open(store Store, opts ...Option) (*Queue, error) {
+	q := New(append(opts, WithStore(store))...)
+	jobs, err := store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load jobs: %w", err)
+	}
+	for _, j := range jobs {
+		job := j
+		if job.Status == StatusRunning {
+			job.Status = StatusPending
+		}
+		q.all[job.ID] = &job
+		if job.ID > q.next {
+			q.next = job.ID
+		}
+		if job.Status == StatusPending {
+			q.jobs = append(q.jobs, job.ID)
+		}
+	}
+	sort.Ints(q.jobs)
+	return q, nil
+}
+
+// Register associates a handler with a job type. Register handlers before
+// workers start; jobs of an unregistered type fail when run.
+func (q *Queue) Register(typ string, h Handler) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.handlers[typ] = h
+}
+
+// save writes a job through to the store, if any. Func-only jobs are skipped.
+// Callers hold q.mu.
+func (q *Queue) save(job *Job) error {
+	if q.store == nil || job.Type == "" {
+		return nil
+	}
+	return q.store.Save(*job)
+}
+
+func (q *Queue) mustSave(job *Job) {
+	if err := q.save(job); err != nil {
+		log.Printf("queue: persist job %d: %v", job.ID, err)
+	}
+}
+
+// Close closes the underlying store, if any.
+func (q *Queue) Close() error {
+	if q.store == nil {
+		return nil
+	}
+	return q.store.Close()
+}
+
+// EnqueueJob adds a persistable job of a registered-by-name type and returns
+// its ID. The job is written to the store before it becomes visible.
+func (q *Queue) EnqueueJob(typ string, data []byte) (int, error) {
+	if typ == "" {
+		return 0, errors.New("queue: job type must not be empty")
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	job := &Job{ID: q.next + 1, Type: typ, Data: data, Status: StatusPending, EnqueuedAt: q.now()}
+	if err := q.save(job); err != nil {
+		return 0, fmt.Errorf("persist job: %w", err)
+	}
+	q.next++
+	q.all[job.ID] = job
+	q.jobs = append(q.jobs, job.ID)
+	return job.ID, nil
 }
 
 // backoff returns the delay before the retry following the given failed attempt (1-based).
@@ -107,9 +214,25 @@ func (q *Queue) Dequeue() (Job, bool) {
 		job.Status = StatusRunning
 		job.StartedAt = now
 		job.Attempts++
-		return *job, true
+		q.mustSave(job)
+		snap := *job
+		if job.Type != "" {
+			snap.Payload = q.payloadFor(job)
+		}
+		return snap, true
 	}
 	return Job{}, false
+}
+
+// payloadFor builds the runnable for a typed job. Callers hold q.mu.
+func (q *Queue) payloadFor(job *Job) func() error {
+	h, ok := q.handlers[job.Type]
+	if !ok {
+		typ := job.Type
+		return func() error { return fmt.Errorf("no handler registered for job type %q", typ) }
+	}
+	data := job.Data
+	return func() error { return h(data) }
 }
 
 // Complete records the outcome of a running job: succeeded if err is nil.
@@ -139,6 +262,7 @@ func (q *Queue) Complete(id int, err error) {
 		job.Status = StatusFailed
 		job.Err = err
 	}
+	q.mustSave(job)
 }
 
 // Get looks up a job by ID and returns a snapshot of its current state.

@@ -8,6 +8,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Worker pool that polls the queue and runs jobs concurrently (`WorkerPool`)
 - Job status tracking (pending/running/succeeded/failed) and lookup by ID (`Queue.Get`)
 - Configurable retries with exponential backoff (`queue.WithRetry`)
+- SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
 ## Usage
 
@@ -21,6 +22,16 @@ q.Enqueue(func() error {
 pool := queue.NewWorkerPool(q, 3, 20*time.Millisecond)
 pool.Start()
 defer pool.Stop()
+```
+
+### Persistent jobs
+
+```go
+store, _ := queue.OpenSQLite("jobs.db")
+q, _ := queue.Open(store) // recovers pending/interrupted jobs
+defer q.Close()
+q.Register("email", func(data []byte) error { /* send */ return nil })
+q.EnqueueJob("email", []byte("a@example.com"))
 ```
 
 ## Run the demo
