@@ -19,6 +19,32 @@ const (
 	StatusFailed    Status = "failed"
 )
 
+// Priority orders pending jobs: higher priorities are dequeued first.
+// The zero value is PriorityNormal, so jobs enqueued without a priority
+// behave as before.
+type Priority int
+
+const (
+	PriorityLow    Priority = -1
+	PriorityNormal Priority = 0
+	PriorityHigh   Priority = 1
+)
+
+func (p Priority) String() string {
+	switch p {
+	case PriorityLow:
+		return "low"
+	case PriorityNormal:
+		return "normal"
+	case PriorityHigh:
+		return "high"
+	}
+	return fmt.Sprintf("priority(%d)", int(p))
+}
+
+// Valid reports whether p is one of the defined priorities.
+func (p Priority) Valid() bool { return p >= PriorityLow && p <= PriorityHigh }
+
 // Job is a unit of work submitted to the queue.
 type Job struct {
 	ID         int
@@ -30,6 +56,7 @@ type Job struct {
 	FinishedAt time.Time
 	Attempts   int       // number of times the job has been dequeued to run
 	RunAt      time.Time // earliest time the job may be dequeued (set when awaiting a retry)
+	Priority   Priority  // higher priority jobs are dequeued first; FIFO within a priority
 
 	// Type and Data identify a persistable job: Type names a registered Handler
 	// and Data is its opaque argument. Jobs enqueued with a bare func have an
@@ -70,7 +97,7 @@ func WithStore(s Store) Option {
 	return func(q *Queue) { q.store = s }
 }
 
-// Queue is a simple thread-safe FIFO job queue.
+// Queue is a thread-safe job queue: highest priority first, FIFO within a priority.
 type Queue struct {
 	mu   sync.Mutex
 	jobs []int // IDs of pending jobs, in FIFO order
@@ -154,13 +181,21 @@ func (q *Queue) Close() error {
 // EnqueueJob adds a persistable job of a registered-by-name type and returns
 // its ID. The job is written to the store before it becomes visible.
 func (q *Queue) EnqueueJob(typ string, data []byte) (int, error) {
+	return q.EnqueueJobWithPriority(typ, data, PriorityNormal)
+}
+
+// EnqueueJobWithPriority is EnqueueJob with an explicit priority.
+func (q *Queue) EnqueueJobWithPriority(typ string, data []byte, p Priority) (int, error) {
 	if typ == "" {
 		return 0, errors.New("queue: job type must not be empty")
+	}
+	if !p.Valid() {
+		return 0, fmt.Errorf("queue: invalid priority %d", int(p))
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	job := &Job{ID: q.next + 1, Type: typ, Data: data, Status: StatusPending, EnqueuedAt: q.now()}
+	job := &Job{ID: q.next + 1, Type: typ, Data: data, Priority: p, Status: StatusPending, EnqueuedAt: q.now()}
 	if err := q.save(job); err != nil {
 		return 0, fmt.Errorf("persist job: %w", err)
 	}
@@ -187,17 +222,28 @@ func (q *Queue) backoff(attempt int) time.Duration {
 
 // Enqueue adds a job to the queue and returns its assigned ID.
 func (q *Queue) Enqueue(payload func() error) int {
+	id, _ := q.EnqueueWithPriority(payload, PriorityNormal)
+	return id
+}
+
+// EnqueueWithPriority adds a job with an explicit priority. It returns an
+// error if p is not a defined priority.
+func (q *Queue) EnqueueWithPriority(payload func() error, p Priority) (int, error) {
+	if !p.Valid() {
+		return 0, fmt.Errorf("queue: invalid priority %d", int(p))
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	q.next++
-	job := &Job{ID: q.next, Payload: payload, Status: StatusPending, EnqueuedAt: q.now()}
+	job := &Job{ID: q.next, Payload: payload, Priority: p, Status: StatusPending, EnqueuedAt: q.now()}
 	q.all[job.ID] = job
 	q.jobs = append(q.jobs, job.ID)
-	return job.ID
+	return job.ID, nil
 }
 
 // Dequeue removes and returns the next ready job, marking it running.
+// The highest-priority ready job wins; ties go to the job queued earliest.
 // Jobs waiting out a retry backoff are skipped until their RunAt passes.
 // It returns ok=false if no job is ready. The returned Job is a snapshot.
 func (q *Queue) Dequeue() (Job, bool) {
@@ -205,12 +251,19 @@ func (q *Queue) Dequeue() (Job, bool) {
 	defer q.mu.Unlock()
 
 	now := q.now()
+	best := -1
 	for i, id := range q.jobs {
 		job := q.all[id]
 		if job.RunAt.After(now) {
 			continue
 		}
-		q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
+		if best < 0 || job.Priority > q.all[q.jobs[best]].Priority {
+			best = i
+		}
+	}
+	if best >= 0 {
+		job := q.all[q.jobs[best]]
+		q.jobs = append(q.jobs[:best], q.jobs[best+1:]...)
 		job.Status = StatusRunning
 		job.StartedAt = now
 		job.Attempts++
