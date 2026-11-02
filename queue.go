@@ -17,6 +17,9 @@ const (
 	StatusRunning   Status = "running"
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
+	// StatusDead marks a job that exhausted its retries and was moved to the
+	// dead-letter queue (only when WithDeadLetter is enabled).
+	StatusDead Status = "dead"
 )
 
 // Priority orders pending jobs: higher priorities are dequeued first.
@@ -91,6 +94,13 @@ func WithRetry(maxRetries int, base, max time.Duration) Option {
 	}
 }
 
+// WithDeadLetter moves jobs that exhaust their retries to the dead-letter
+// queue (StatusDead) instead of leaving them as StatusFailed. Dead jobs are
+// kept for inspection and can be re-run with Requeue or dropped with Discard.
+func WithDeadLetter() Option {
+	return func(q *Queue) { q.deadLetter = true }
+}
+
 // WithStore enables write-through persistence for typed jobs. Use Open to
 // also recover previously persisted jobs.
 func WithStore(s Store) Option {
@@ -107,6 +117,7 @@ type Queue struct {
 	store    Store
 	handlers map[string]Handler
 
+	deadLetter bool
 	maxRetries int
 	baseDelay  time.Duration
 	maxDelay   time.Duration
@@ -313,6 +324,9 @@ func (q *Queue) Complete(id int, err error) {
 	default:
 		job.FinishedAt = now
 		job.Status = StatusFailed
+		if q.deadLetter {
+			job.Status = StatusDead
+		}
 		job.Err = err
 	}
 	q.mustSave(job)
@@ -335,4 +349,57 @@ func (q *Queue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.jobs)
+}
+
+// DeadLetters returns snapshots of all dead-lettered jobs, ordered by ID.
+func (q *Queue) DeadLetters() []Job {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []Job
+	for _, job := range q.all {
+		if job.Status == StatusDead {
+			out = append(out, *job)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// Requeue moves a dead-lettered job back to pending with its attempt count
+// reset, so it gets a fresh set of retries. Jobs enqueued with a bare func
+// cannot be requeued after a restart, but work normally within a process.
+func (q *Queue) Requeue(id int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job, ok := q.all[id]
+	if !ok {
+		return fmt.Errorf("queue: job %d not found", id)
+	}
+	if job.Status != StatusDead {
+		return fmt.Errorf("queue: job %d is %s, not dead", id, job.Status)
+	}
+	job.Status = StatusPending
+	job.Attempts = 0
+	job.Err = nil
+	job.RunAt = time.Time{}
+	job.FinishedAt = time.Time{}
+	q.jobs = append(q.jobs, job.ID)
+	q.mustSave(job)
+	return nil
+}
+
+// Discard permanently drops a dead-lettered job from the in-memory queue.
+// The persisted record is kept (marked dead) for auditing.
+func (q *Queue) Discard(id int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job, ok := q.all[id]
+	if !ok {
+		return fmt.Errorf("queue: job %d not found", id)
+	}
+	if job.Status != StatusDead {
+		return fmt.Errorf("queue: job %d is %s, not dead", id, job.Status)
+	}
+	delete(q.all, id)
+	return nil
 }

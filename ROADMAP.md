@@ -7,7 +7,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - [x] Retries with exponential backoff on failure
 - [x] Persistence: swap in-memory store for SQLite
 - [x] Priority queues (high/normal/low)
-- [ ] Dead-letter queue for jobs that exhaust retries
+- [x] Dead-letter queue for jobs that exhaust retries
 - [ ] Graceful shutdown (drain in-flight jobs on SIGTERM)
 - [ ] HTTP API: submit job, get status, list jobs
 - [ ] Scheduled/delayed jobs (run-at timestamp)
@@ -30,3 +30,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - Day 3 (2026-10-26): retries with exponential backoff — `queue.New(queue.WithRetry(maxRetries, base, max))`; failed jobs go back to pending with a `RunAt` delay (base·2^(n-1), capped), `Attempts` tracked on `Job`, `Dequeue` skips jobs still backing off; marked failed once retries are exhausted.
 - Day 4 (2026-10-28): SQLite persistence — `Store` interface + pure-Go `SQLiteStore` (modernc.org/sqlite); `queue.Open(store)` recovers jobs after restart (running jobs revert to pending); persistable jobs are enqueued via `EnqueueJob(type, data)` and run by handlers added with `Register` (bare-func jobs stay in-memory only); state changes are written through on enqueue/dequeue/complete.
 - Day 5 (2026-10-30): priority queues — `Priority` (low/normal/high, zero value = normal); `EnqueueWithPriority` / `EnqueueJobWithPriority`; `Dequeue` returns the highest-priority ready job, FIFO within a priority, and a backing-off job never blocks lower-priority ready jobs; priority persisted in SQLite with automatic migration of older databases. No aging yet, so sustained high-priority load can starve low.
+- Day 6 (2026-11-02): dead-letter queue — `queue.WithDeadLetter()` moves jobs that exhaust retries to `StatusDead` instead of `StatusFailed`; `DeadLetters()` lists them, `Requeue(id)` gives a dead job a fresh set of retries, `Discard(id)` drops it from memory (persisted record kept for audit). Dead jobs persist in SQLite and are not re-run on restart.
