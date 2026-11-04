@@ -10,6 +10,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Priority queues: high/normal/low via `EnqueueWithPriority` / `EnqueueJobWithPriority`, FIFO within a priority
 - Configurable retries with exponential backoff (`queue.WithRetry`)
 - Dead-letter queue (`WithDeadLetter`): inspect, requeue, or discard jobs that exhausted retries
+- Graceful shutdown: `WorkerPool.Shutdown(ctx)` drains in-flight jobs; `RunUntilSignal` handles SIGINT/SIGTERM
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
 ## Usage
