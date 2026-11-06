@@ -403,3 +403,18 @@ func (q *Queue) Discard(id int) error {
 	delete(q.all, id)
 	return nil
 }
+
+// List returns snapshots of all known jobs ordered by ID. If status is
+// non-empty only jobs in that status are returned.
+func (q *Queue) List(status Status) []Job {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]Job, 0, len(q.all))
+	for _, job := range q.all {
+		if status == "" || job.Status == status {
+			out = append(out, *job)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}

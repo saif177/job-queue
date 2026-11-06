@@ -9,7 +9,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - [x] Priority queues (high/normal/low)
 - [x] Dead-letter queue for jobs that exhaust retries
 - [x] Graceful shutdown (drain in-flight jobs on SIGTERM)
-- [ ] HTTP API: submit job, get status, list jobs
+- [x] HTTP API: submit job, get status, list jobs
 - [ ] Scheduled/delayed jobs (run-at timestamp)
 - [ ] Cron-style recurring jobs
 - [ ] Rate limiting per job type
@@ -32,3 +32,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - Day 5 (2026-10-30): priority queues — `Priority` (low/normal/high, zero value = normal); `EnqueueWithPriority` / `EnqueueJobWithPriority`; `Dequeue` returns the highest-priority ready job, FIFO within a priority, and a backing-off job never blocks lower-priority ready jobs; priority persisted in SQLite with automatic migration of older databases. No aging yet, so sustained high-priority load can starve low.
 - Day 6 (2026-11-02): dead-letter queue — `queue.WithDeadLetter()` moves jobs that exhaust retries to `StatusDead` instead of `StatusFailed`; `DeadLetters()` lists them, `Requeue(id)` gives a dead job a fresh set of retries, `Discard(id)` drops it from memory (persisted record kept for audit). Dead jobs persist in SQLite and are not re-run on restart.
 - Day 7 (2026-11-04): graceful shutdown — `WorkerPool.Shutdown(ctx)` stops dequeuing and drains in-flight jobs (returns `ctx.Err()` on timeout); `Stop()` is now idempotent; `RunUntilSignal(timeout, sigs...)` starts the pool and shuts down on SIGINT/SIGTERM. Fixed a race where a worker could dequeue one more job after stop was signalled. Jobs still running when the timeout hits revert to pending on restart with a persistent store.
+- Day 8 (2026-11-06): HTTP API — `Queue.HTTPHandler()` serves `POST /jobs` (type, data, priority; 201 + Location), `GET /jobs/{id}`, and `GET /jobs?status=` with JSON responses and validation (400 for bad body/priority/unregistered type/status, 404 unknown job, 405 wrong method). Added `Queue.List(status)`. Only typed (registered-handler) jobs can be submitted over HTTP; no auth yet.
