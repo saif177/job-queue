@@ -12,6 +12,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Dead-letter queue (`WithDeadLetter`): inspect, requeue, or discard jobs that exhausted retries
 - Graceful shutdown: `WorkerPool.Shutdown(ctx)` drains in-flight jobs; `RunUntilSignal` handles SIGINT/SIGTERM
 - HTTP API (`Queue.HTTPHandler`): submit jobs, get status by ID, list jobs (filter by status)
+- Scheduled/delayed jobs: `EnqueueAt` / `EnqueueIn` / `EnqueueJobAt` / `EnqueueJobIn`, or `run_at` / `delay` over HTTP
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
 ## Usage
@@ -58,6 +59,7 @@ http.ListenAndServe(":8080", q.HTTPHandler())
 
 ```
 curl -X POST localhost:8080/jobs -d '{"type":"email","data":"a@example.com","priority":"high"}'
+curl -X POST localhost:8080/jobs -d '{"type":"email","data":"a@example.com","delay":"30s"}'
 curl localhost:8080/jobs/1
 curl 'localhost:8080/jobs?status=pending'
 ```

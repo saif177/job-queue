@@ -10,7 +10,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - [x] Dead-letter queue for jobs that exhaust retries
 - [x] Graceful shutdown (drain in-flight jobs on SIGTERM)
 - [x] HTTP API: submit job, get status, list jobs
-- [ ] Scheduled/delayed jobs (run-at timestamp)
+- [x] Scheduled/delayed jobs (run-at timestamp)
 - [ ] Cron-style recurring jobs
 - [ ] Rate limiting per job type
 - [ ] Concurrency limits per job type / worker pool tuning
@@ -33,3 +33,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - Day 6 (2026-11-02): dead-letter queue — `queue.WithDeadLetter()` moves jobs that exhaust retries to `StatusDead` instead of `StatusFailed`; `DeadLetters()` lists them, `Requeue(id)` gives a dead job a fresh set of retries, `Discard(id)` drops it from memory (persisted record kept for audit). Dead jobs persist in SQLite and are not re-run on restart.
 - Day 7 (2026-11-04): graceful shutdown — `WorkerPool.Shutdown(ctx)` stops dequeuing and drains in-flight jobs (returns `ctx.Err()` on timeout); `Stop()` is now idempotent; `RunUntilSignal(timeout, sigs...)` starts the pool and shuts down on SIGINT/SIGTERM. Fixed a race where a worker could dequeue one more job after stop was signalled. Jobs still running when the timeout hits revert to pending on restart with a persistent store.
 - Day 8 (2026-11-06): HTTP API — `Queue.HTTPHandler()` serves `POST /jobs` (type, data, priority; 201 + Location), `GET /jobs/{id}`, and `GET /jobs?status=` with JSON responses and validation (400 for bad body/priority/unregistered type/status, 404 unknown job, 405 wrong method). Added `Queue.List(status)`. Only typed (registered-handler) jobs can be submitted over HTTP; no auth yet.
+- Day 9 (2026-11-09): scheduled/delayed jobs — `EnqueueAt`/`EnqueueIn` (func jobs) and `EnqueueJobAt`/`EnqueueJobIn` (typed jobs) set a `RunAt` before which `Dequeue` skips the job (reusing the retry-backoff mechanism, so scheduled jobs never block ready ones); HTTP `POST /jobs` accepts `run_at` (RFC 3339) or `delay` (e.g. "30s"), mutually exclusive, validated with 400s; RunAt persists in SQLite so schedules survive restarts (overdue jobs run immediately on recovery). No timer wakeups — workers still poll.

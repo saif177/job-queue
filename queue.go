@@ -197,6 +197,21 @@ func (q *Queue) EnqueueJob(typ string, data []byte) (int, error) {
 
 // EnqueueJobWithPriority is EnqueueJob with an explicit priority.
 func (q *Queue) EnqueueJobWithPriority(typ string, data []byte, p Priority) (int, error) {
+	return q.enqueueJob(typ, data, p, time.Time{})
+}
+
+// EnqueueJobAt schedules a persistable job to become eligible at runAt.
+// A runAt in the past (or zero) makes the job ready immediately.
+func (q *Queue) EnqueueJobAt(typ string, data []byte, p Priority, runAt time.Time) (int, error) {
+	return q.enqueueJob(typ, data, p, runAt)
+}
+
+// EnqueueJobIn schedules a persistable job to become eligible after delay.
+func (q *Queue) EnqueueJobIn(typ string, data []byte, p Priority, delay time.Duration) (int, error) {
+	return q.enqueueJob(typ, data, p, q.now().Add(delay))
+}
+
+func (q *Queue) enqueueJob(typ string, data []byte, p Priority, runAt time.Time) (int, error) {
 	if typ == "" {
 		return 0, errors.New("queue: job type must not be empty")
 	}
@@ -206,7 +221,7 @@ func (q *Queue) EnqueueJobWithPriority(typ string, data []byte, p Priority) (int
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	job := &Job{ID: q.next + 1, Type: typ, Data: data, Priority: p, Status: StatusPending, EnqueuedAt: q.now()}
+	job := &Job{ID: q.next + 1, Type: typ, Data: data, Priority: p, Status: StatusPending, EnqueuedAt: q.now(), RunAt: runAt}
 	if err := q.save(job); err != nil {
 		return 0, fmt.Errorf("persist job: %w", err)
 	}
@@ -251,6 +266,27 @@ func (q *Queue) EnqueueWithPriority(payload func() error, p Priority) (int, erro
 	q.all[job.ID] = job
 	q.jobs = append(q.jobs, job.ID)
 	return job.ID, nil
+}
+
+// EnqueueAt schedules a func job to become eligible at runAt. A runAt in the
+// past (or zero) makes it ready immediately.
+func (q *Queue) EnqueueAt(payload func() error, p Priority, runAt time.Time) (int, error) {
+	if !p.Valid() {
+		return 0, fmt.Errorf("queue: invalid priority %d", int(p))
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	q.next++
+	job := &Job{ID: q.next, Payload: payload, Priority: p, Status: StatusPending, EnqueuedAt: q.now(), RunAt: runAt}
+	q.all[job.ID] = job
+	q.jobs = append(q.jobs, job.ID)
+	return job.ID, nil
+}
+
+// EnqueueIn schedules a func job to become eligible after delay.
+func (q *Queue) EnqueueIn(payload func() error, p Priority, delay time.Duration) (int, error) {
+	return q.EnqueueAt(payload, p, q.now().Add(delay))
 }
 
 // Dequeue removes and returns the next ready job, marking it running.

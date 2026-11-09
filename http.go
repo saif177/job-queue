@@ -45,11 +45,13 @@ type submitRequest struct {
 	Type     string `json:"type"`
 	Data     string `json:"data"`
 	Priority string `json:"priority"` // "low", "normal" (default), "high"
+	RunAt    string `json:"run_at"`   // optional RFC 3339 timestamp to schedule the job
+	Delay    string `json:"delay"`    // optional Go duration (e.g. "30s"); exclusive with run_at
 }
 
 // HTTPHandler returns an http.Handler exposing the queue over a JSON API:
 //
-//	POST /jobs        {"type","data","priority"} -> 201 job
+//	POST /jobs        {"type","data","priority","run_at"|"delay"} -> 201 job
 //	GET  /jobs/{id}   -> job
 //	GET  /jobs        ?status=pending|running|... -> {"jobs":[...]}
 //
@@ -102,6 +104,27 @@ func (q *Queue) httpSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "priority must be low, normal or high")
 		return
 	}
+	var runAt time.Time
+	if req.RunAt != "" && req.Delay != "" {
+		writeError(w, http.StatusBadRequest, "run_at and delay are mutually exclusive")
+		return
+	}
+	if req.RunAt != "" {
+		t, err := time.Parse(time.RFC3339, req.RunAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "run_at must be an RFC 3339 timestamp")
+			return
+		}
+		runAt = t
+	}
+	if req.Delay != "" {
+		d, err := time.ParseDuration(req.Delay)
+		if err != nil || d < 0 {
+			writeError(w, http.StatusBadRequest, "delay must be a non-negative duration like 30s")
+			return
+		}
+		runAt = q.now().Add(d)
+	}
 	q.mu.Lock()
 	_, registered := q.handlers[req.Type]
 	q.mu.Unlock()
@@ -109,7 +132,7 @@ func (q *Queue) httpSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no handler registered for job type "+strconv.Quote(req.Type))
 		return
 	}
-	id, err := q.EnqueueJobWithPriority(req.Type, []byte(req.Data), p)
+	id, err := q.EnqueueJobAt(req.Type, []byte(req.Data), p, runAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
