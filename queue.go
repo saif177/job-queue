@@ -114,6 +114,9 @@ type Queue struct {
 	all  map[int]*Job
 	next int
 
+	cronMu sync.Mutex
+	crons  map[string]*cronEntry
+
 	store    Store
 	handlers map[string]Handler
 

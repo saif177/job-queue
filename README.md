@@ -13,6 +13,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Graceful shutdown: `WorkerPool.Shutdown(ctx)` drains in-flight jobs; `RunUntilSignal` handles SIGINT/SIGTERM
 - HTTP API (`Queue.HTTPHandler`): submit jobs, get status by ID, list jobs (filter by status)
 - Scheduled/delayed jobs: `EnqueueAt` / `EnqueueIn` / `EnqueueJobAt` / `EnqueueJobIn`, or `run_at` / `delay` over HTTP
+- Cron-style recurring jobs: `AddCron(name, "*/5 * * * *", type, data, priority)` + `RunCron(ctx, interval)`
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
 ## Usage
