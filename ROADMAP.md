@@ -12,7 +12,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - [x] HTTP API: submit job, get status, list jobs
 - [x] Scheduled/delayed jobs (run-at timestamp)
 - [x] Cron-style recurring jobs
-- [ ] Rate limiting per job type
+- [x] Rate limiting per job type
 - [ ] Concurrency limits per job type / worker pool tuning
 - [ ] Postgres backend option (swap-able storage interface)
 - [ ] Job middleware (logging, metrics, timeout enforcement)
@@ -35,3 +35,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - Day 8 (2026-11-06): HTTP API — `Queue.HTTPHandler()` serves `POST /jobs` (type, data, priority; 201 + Location), `GET /jobs/{id}`, and `GET /jobs?status=` with JSON responses and validation (400 for bad body/priority/unregistered type/status, 404 unknown job, 405 wrong method). Added `Queue.List(status)`. Only typed (registered-handler) jobs can be submitted over HTTP; no auth yet.
 - Day 9 (2026-11-09): scheduled/delayed jobs — `EnqueueAt`/`EnqueueIn` (func jobs) and `EnqueueJobAt`/`EnqueueJobIn` (typed jobs) set a `RunAt` before which `Dequeue` skips the job (reusing the retry-backoff mechanism, so scheduled jobs never block ready ones); HTTP `POST /jobs` accepts `run_at` (RFC 3339) or `delay` (e.g. "30s"), mutually exclusive, validated with 400s; RunAt persists in SQLite so schedules survive restarts (overdue jobs run immediately on recovery). No timer wakeups — workers still poll.
 - Day 10 (2026-11-11): cron-style recurring jobs — `ParseCron` (5-field: lists, ranges, steps, `@hourly/@daily/@weekly`, dom/dow OR semantics, Sunday as 0 or 7) with `Next(t)`; `Queue.AddCron(name, spec, type, data, priority)` / `RemoveCron` / `Crons`; `Tick()` enqueues a typed job for each due entry and `RunCron(ctx, interval)` drives it. Missed firings collapse into one job rather than replaying. Schedules are in-memory only (re-register on startup) and evaluated in the clock's timezone; no HTTP endpoint yet.
+- Day 11 (2026-11-13): per-type rate limiting — `queue.WithRateLimit(type, perSecond, burst)` adds a token bucket per typed job type; `Dequeue` skips jobs whose type has no token (they stay pending, don't fail or use retries, and never block other types or lower priorities), consuming a token only when a job actually starts, so retries are limited too. Limits are in-memory config set at construction; func jobs can't be limited; no HTTP visibility yet.

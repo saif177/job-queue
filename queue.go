@@ -120,6 +120,8 @@ type Queue struct {
 	store    Store
 	handlers map[string]Handler
 
+	limits map[string]*bucket // per-type token buckets (see WithRateLimit)
+
 	deadLetter bool
 	maxRetries int
 	baseDelay  time.Duration
@@ -307,6 +309,9 @@ func (q *Queue) Dequeue() (Job, bool) {
 		if job.RunAt.After(now) {
 			continue
 		}
+		if job.Type != "" && !q.rateOK(job.Type, now) {
+			continue
+		}
 		if best < 0 || job.Priority > q.all[q.jobs[best]].Priority {
 			best = i
 		}
@@ -314,6 +319,7 @@ func (q *Queue) Dequeue() (Job, bool) {
 	if best >= 0 {
 		job := q.all[q.jobs[best]]
 		q.jobs = append(q.jobs[:best], q.jobs[best+1:]...)
+		q.takeToken(job.Type)
 		job.Status = StatusRunning
 		job.StartedAt = now
 		job.Attempts++
