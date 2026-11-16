@@ -15,6 +15,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Scheduled/delayed jobs: `EnqueueAt` / `EnqueueIn` / `EnqueueJobAt` / `EnqueueJobIn`, or `run_at` / `delay` over HTTP
 - Cron-style recurring jobs: `AddCron(name, "*/5 * * * *", type, data, priority)` + `RunCron(ctx, interval)`
 - Per-type rate limiting (`WithRateLimit(type, perSecond, burst)`): token bucket applied at dequeue
+- Per-type concurrency limits (`WithConcurrencyLimit(type, max)`): cap simultaneously running jobs of a type
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
 ## Usage

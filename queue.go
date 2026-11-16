@@ -122,6 +122,9 @@ type Queue struct {
 
 	limits map[string]*bucket // per-type token buckets (see WithRateLimit)
 
+	concLimits map[string]int // max concurrently running jobs per type (see WithConcurrencyLimit)
+	running    map[string]int // currently running typed jobs per type
+
 	deadLetter bool
 	maxRetries int
 	baseDelay  time.Duration
@@ -309,7 +312,7 @@ func (q *Queue) Dequeue() (Job, bool) {
 		if job.RunAt.After(now) {
 			continue
 		}
-		if job.Type != "" && !q.rateOK(job.Type, now) {
+		if job.Type != "" && (!q.concurrencyOK(job.Type) || !q.rateOK(job.Type, now)) {
 			continue
 		}
 		if best < 0 || job.Priority > q.all[q.jobs[best]].Priority {
@@ -320,6 +323,7 @@ func (q *Queue) Dequeue() (Job, bool) {
 		job := q.all[q.jobs[best]]
 		q.jobs = append(q.jobs[:best], q.jobs[best+1:]...)
 		q.takeToken(job.Type)
+		q.startRunning(job.Type)
 		job.Status = StatusRunning
 		job.StartedAt = now
 		job.Attempts++
@@ -356,6 +360,9 @@ func (q *Queue) Complete(id int, err error) {
 		return
 	}
 	now := q.now()
+	if job.Status == StatusRunning {
+		q.stopRunning(job.Type)
+	}
 	switch {
 	case err == nil:
 		job.FinishedAt = now
