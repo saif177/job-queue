@@ -14,7 +14,7 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - [x] Cron-style recurring jobs
 - [x] Rate limiting per job type
 - [x] Concurrency limits per job type / worker pool tuning
-- [ ] Postgres backend option (swap-able storage interface)
+- [x] Postgres backend option (swap-able storage interface)
 - [ ] Job middleware (logging, metrics, timeout enforcement)
 - [ ] Simple web dashboard (list jobs, retry/cancel from UI)
 - [ ] Structured metrics endpoint (Prometheus format)
@@ -37,3 +37,4 @@ Incremental features, roughly in order. Pick the next unchecked item each sessio
 - Day 10 (2026-11-11): cron-style recurring jobs — `ParseCron` (5-field: lists, ranges, steps, `@hourly/@daily/@weekly`, dom/dow OR semantics, Sunday as 0 or 7) with `Next(t)`; `Queue.AddCron(name, spec, type, data, priority)` / `RemoveCron` / `Crons`; `Tick()` enqueues a typed job for each due entry and `RunCron(ctx, interval)` drives it. Missed firings collapse into one job rather than replaying. Schedules are in-memory only (re-register on startup) and evaluated in the clock's timezone; no HTTP endpoint yet.
 - Day 11 (2026-11-13): per-type rate limiting — `queue.WithRateLimit(type, perSecond, burst)` adds a token bucket per typed job type; `Dequeue` skips jobs whose type has no token (they stay pending, don't fail or use retries, and never block other types or lower priorities), consuming a token only when a job actually starts, so retries are limited too. Limits are in-memory config set at construction; func jobs can't be limited; no HTTP visibility yet.
 - Day 12 (2026-11-16): per-type concurrency limits — `queue.WithConcurrencyLimit(type, max)` caps simultaneously running jobs of a type independent of pool size; over-cap jobs stay pending (no failure, no retry used) and never block other types; slots are released in `Complete` (success, failure or retry; double-complete is safe); `Queue.Running(type)` reports the current count. Composes with rate limiting. Limits are in-memory config; running counts reset on restart (running jobs revert to pending); func jobs can't be limited.
+- Day 13 (2026-11-18): Postgres backend — `queue.OpenPostgres(dsn)` returns a `PostgresStore` implementing the existing `Store` interface (pgx via database/sql, auto-creates the `jobs` table, upsert on save, same nanosecond timestamp encoding as SQLite), usable anywhere `SQLiteStore` is with `Open`/`WithStore`. Shared store contract tests run against SQLite always and Postgres when `JOBQUEUE_POSTGRES_DSN` is set (verified against a local Postgres 16). No migrations framework yet; the queue still keeps its working set in memory per process, so multi-process sharing is the later horizontal-scaling item.
