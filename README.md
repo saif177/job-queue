@@ -16,6 +16,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Cron-style recurring jobs: `AddCron(name, "*/5 * * * *", type, data, priority)` + `RunCron(ctx, interval)`
 - Per-type rate limiting (`WithRateLimit(type, perSecond, burst)`): token bucket applied at dequeue
 - Per-type concurrency limits (`WithConcurrencyLimit(type, max)`): cap simultaneously running jobs of a type
+- Job middleware (`WithMiddleware`): `Logging`, `Recover`, `Timeout(d)` and a `Metrics` collector, or your own wrappers
 - Postgres persistence (`OpenPostgres(dsn)`): same `Store` interface, swap-in for SQLite
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 

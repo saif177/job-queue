@@ -125,6 +125,8 @@ type Queue struct {
 	concLimits map[string]int // max concurrently running jobs per type (see WithConcurrencyLimit)
 	running    map[string]int // currently running typed jobs per type
 
+	middleware []Middleware // wraps job execution (see WithMiddleware)
+
 	deadLetter bool
 	maxRetries int
 	baseDelay  time.Duration

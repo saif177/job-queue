@@ -111,7 +111,7 @@ func (p *WorkerPool) run(id int) {
 			if !ok {
 				continue
 			}
-			err := job.Payload()
+			err := p.queue.Execute(job)
 			p.queue.Complete(job.ID, err)
 			if err != nil {
 				log.Printf("worker %d: job %d failed: %v", id, job.ID, err)
