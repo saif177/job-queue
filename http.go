@@ -54,6 +54,9 @@ type submitRequest struct {
 //	POST /jobs        {"type","data","priority","run_at"|"delay"} -> 201 job
 //	GET  /jobs/{id}   -> job
 //	GET  /jobs        ?status=pending|running|... -> {"jobs":[...]}
+//	POST /jobs/{id}/cancel  cancel a pending job (409 if not pending)
+//	POST /jobs/{id}/retry   requeue a failed/dead/cancelled job (409 otherwise)
+//	GET  /            simple HTML dashboard (list, filter, retry, cancel)
 //
 // Only typed jobs (registered handlers) can be submitted over HTTP.
 func (q *Queue) HTTPHandler() http.Handler {
@@ -61,6 +64,9 @@ func (q *Queue) HTTPHandler() http.Handler {
 	mux.HandleFunc("POST /jobs", q.httpSubmit)
 	mux.HandleFunc("GET /jobs/{id}", q.httpGet)
 	mux.HandleFunc("GET /jobs", q.httpList)
+	mux.HandleFunc("POST /jobs/{id}/cancel", q.httpAction(q.Cancel))
+	mux.HandleFunc("POST /jobs/{id}/retry", q.httpAction(q.Retry))
+	mux.HandleFunc("GET /{$}", dashboard)
 	return mux
 }
 
@@ -159,7 +165,7 @@ func (q *Queue) httpGet(w http.ResponseWriter, r *http.Request) {
 func (q *Queue) httpList(w http.ResponseWriter, r *http.Request) {
 	status := Status(r.URL.Query().Get("status"))
 	switch status {
-	case "", StatusPending, StatusRunning, StatusSucceeded, StatusFailed, StatusDead:
+	case "", StatusPending, StatusRunning, StatusSucceeded, StatusFailed, StatusDead, StatusCancelled:
 	default:
 		writeError(w, http.StatusBadRequest, "unknown status "+strconv.Quote(string(status)))
 		return
@@ -170,4 +176,26 @@ func (q *Queue) httpList(w http.ResponseWriter, r *http.Request) {
 		views[i] = toView(j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": views})
+}
+
+// httpAction adapts a state-changing Queue method (Cancel, Retry) to a handler
+// that returns the updated job, 404 for unknown IDs and 409 for invalid states.
+func (q *Queue) httpAction(act func(id int) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid job id")
+			return
+		}
+		if _, ok := q.Get(id); !ok {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		if err := act(id); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		job, _ := q.Get(id)
+		writeJSON(w, http.StatusOK, toView(job))
+	}
 }

@@ -20,6 +20,8 @@ const (
 	// StatusDead marks a job that exhausted its retries and was moved to the
 	// dead-letter queue (only when WithDeadLetter is enabled).
 	StatusDead Status = "dead"
+	// StatusCancelled marks a pending job that was cancelled before it ran.
+	StatusCancelled Status = "cancelled"
 )
 
 // Priority orders pending jobs: higher priorities are dequeued first.
@@ -471,4 +473,52 @@ func (q *Queue) List(status Status) []Job {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// Cancel stops a pending job from ever running and marks it cancelled.
+// Running and finished jobs cannot be cancelled.
+func (q *Queue) Cancel(id int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job, ok := q.all[id]
+	if !ok {
+		return fmt.Errorf("queue: job %d not found", id)
+	}
+	if job.Status != StatusPending {
+		return fmt.Errorf("queue: job %d is %s, only pending jobs can be cancelled", id, job.Status)
+	}
+	for i, qid := range q.jobs {
+		if qid == id {
+			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
+			break
+		}
+	}
+	job.Status = StatusCancelled
+	job.FinishedAt = q.now()
+	q.mustSave(job)
+	return nil
+}
+
+// Retry puts a failed, dead or cancelled job back in the queue with a fresh
+// set of retries. Other states return an error.
+func (q *Queue) Retry(id int) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job, ok := q.all[id]
+	if !ok {
+		return fmt.Errorf("queue: job %d not found", id)
+	}
+	switch job.Status {
+	case StatusFailed, StatusDead, StatusCancelled:
+	default:
+		return fmt.Errorf("queue: job %d is %s, only failed, dead or cancelled jobs can be retried", id, job.Status)
+	}
+	job.Status = StatusPending
+	job.Attempts = 0
+	job.Err = nil
+	job.RunAt = time.Time{}
+	job.FinishedAt = time.Time{}
+	q.jobs = append(q.jobs, job.ID)
+	q.mustSave(job)
+	return nil
 }

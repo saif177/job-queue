@@ -12,6 +12,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Dead-letter queue (`WithDeadLetter`): inspect, requeue, or discard jobs that exhausted retries
 - Graceful shutdown: `WorkerPool.Shutdown(ctx)` drains in-flight jobs; `RunUntilSignal` handles SIGINT/SIGTERM
 - HTTP API (`Queue.HTTPHandler`): submit jobs, get status by ID, list jobs (filter by status)
+- Web dashboard at `GET /` (filter jobs, cancel pending, retry failed/dead) plus `POST /jobs/{id}/cancel|retry`; `Queue.Cancel` / `Queue.Retry`
 - Scheduled/delayed jobs: `EnqueueAt` / `EnqueueIn` / `EnqueueJobAt` / `EnqueueJobIn`, or `run_at` / `delay` over HTTP
 - Cron-style recurring jobs: `AddCron(name, "*/5 * * * *", type, data, priority)` + `RunCron(ctx, interval)`
 - Per-type rate limiting (`WithRateLimit(type, perSecond, burst)`): token bucket applied at dequeue
