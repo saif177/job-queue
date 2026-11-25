@@ -66,6 +66,7 @@ func (q *Queue) HTTPHandler() http.Handler {
 	mux.HandleFunc("GET /jobs", q.httpList)
 	mux.HandleFunc("POST /jobs/{id}/cancel", q.httpAction(q.Cancel))
 	mux.HandleFunc("POST /jobs/{id}/retry", q.httpAction(q.Retry))
+	mux.HandleFunc("GET /metrics", q.httpMetrics)
 	mux.HandleFunc("GET /{$}", dashboard)
 	return mux
 }

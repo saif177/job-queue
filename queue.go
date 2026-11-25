@@ -128,6 +128,7 @@ type Queue struct {
 	running    map[string]int // currently running typed jobs per type
 
 	middleware []Middleware // wraps job execution (see WithMiddleware)
+	metrics    *Metrics     // optional collector exported at /metrics (see WithMetrics)
 
 	deadLetter bool
 	maxRetries int

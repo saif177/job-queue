@@ -18,6 +18,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Per-type rate limiting (`WithRateLimit(type, perSecond, burst)`): token bucket applied at dequeue
 - Per-type concurrency limits (`WithConcurrencyLimit(type, max)`): cap simultaneously running jobs of a type
 - Job middleware (`WithMiddleware`): `Logging`, `Recover`, `Timeout(d)` and a `Metrics` collector, or your own wrappers
+- Prometheus metrics at `GET /metrics`: job counts by status, running jobs per type, and run/failure/duration counters via `WithMetrics`
 - Postgres persistence (`OpenPostgres(dsn)`): same `Store` interface, swap-in for SQLite
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
