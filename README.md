@@ -19,6 +19,7 @@ A backend job queue / task scheduler, built incrementally as a daily practice pr
 - Per-type concurrency limits (`WithConcurrencyLimit(type, max)`): cap simultaneously running jobs of a type
 - Job middleware (`WithMiddleware`): `Logging`, `Recover`, `Timeout(d)` and a `Metrics` collector, or your own wrappers
 - Prometheus metrics at `GET /metrics`: job counts by status, running jobs per type, and run/failure/duration counters via `WithMetrics`
+- CLI (`cmd/jobqueue`): `submit`, `get`, `list`, `cancel`, `retry` against the HTTP API, and `serve` to run a SQLite-backed server
 - Postgres persistence (`OpenPostgres(dsn)`): same `Store` interface, swap-in for SQLite
 - SQLite persistence: typed jobs (`EnqueueJob` + `Register`) survive restarts via `queue.Open(store)`
 
@@ -70,6 +71,18 @@ curl -X POST localhost:8080/jobs -d '{"type":"email","data":"a@example.com","del
 curl localhost:8080/jobs/1
 curl 'localhost:8080/jobs?status=pending'
 ```
+
+### CLI
+
+```
+go run ./cmd/jobqueue serve -addr :8080 -db jobs.db     # terminal 1
+export JOBQUEUE_ADDR=localhost:8080
+go run ./cmd/jobqueue submit -priority high echo hello   # terminal 2
+go run ./cmd/jobqueue list -status succeeded
+go run ./cmd/jobqueue get 1
+```
+
+Add `-json` for machine-readable output; `cancel <id>` and `retry <id>` mirror the HTTP actions.
 
 ### Postgres
 
